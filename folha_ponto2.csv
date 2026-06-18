@@ -1,0 +1,51 @@
+colaborador_id;nome;data;entrada;saida_almoco;retorno_almoco;saida;cargo;carga_horaria_diaria
+1;Ana Silva;02/06/2025;08:02;12:05;13:03;17:08;Analista;8
+1;Ana Silva;03/06/2025;08:15;12:00;13:00;17:00;Analista;8
+1;Ana Silva;04/06/2025;08:00;12:10;13:10;19:30;Analista;8
+1;Ana Silva;05/06/2025;08:05;;;17:05;Analista;8
+1;Ana Silva;06/06/2025;08:00;12:00;13:00;17:00;Analista;8
+2;Carlos Mendes;02/06/2025;09:30;12:00;13:00;17:00;Desenvolvedor;8
+2;Carlos Mendes;03/06/2025;;;;;Desenvolvedor;8
+2;Carlos Mendes;04/06/2025;08:00;12:00;13:00;21:00;Desenvolvedor;8
+2;Carlos Mendes;05/06/2025;08:00;12:00;13:00;17:00;Desenvolvedor;8
+2;Carlos Mendes;06/06/2025;10:00;12:00;13:00;17:00;Desenvolvedor;8
+3;Mariana Costa;02/06/2025;07:55;11:55;12:55;16:58;Gerente;8
+3;Mariana Costa;03/06/2025;07:50;11:50;12:50;16:52;Gerente;8
+3;Mariana Costa;04/06/2025;07:45;11:45;12:45;16:48;Gerente;8
+3;Mariana Costa;05/06/2025;07:55;11:55;12:55;16:57;Gerente;8
+3;Mariana Costa;06/06/2025;07:50;11:50;12:50;16:55;Gerente;8
+4;Pedro Oliveira;02/06/2025;08:00;12:00;13:00;17:00;Analista;8
+4;Pedro Oliveira;03/06/2025;08:00;12:00;13:00;17:00;Analista;8
+4;Pedro Oliveira;04/06/2025;;;;;Analista;8
+4;Pedro Oliveira;05/06/2025;;;;;Analista;8
+4;Pedro Oliveira;06/06/2025;08:00;12:00;13:00;15:30;Analista;8
+5;Juliana Ferreira;02/06/2025;08:00;12:00;14:00;17:00;Designer;8
+5;Juliana Ferreira;03/06/2025;08:00;12:00;13:00;17:00;Designer;8
+5;Juliana Ferreira;04/06/2025;08:00;12:00;13:00;20:00;Designer;8
+5;Juliana Ferreira;05/06/2025;08:00;12:00;13:00;20:00;Designer;8
+5;Juliana Ferreira;06/06/2025;08:00;12:00;13:00;20:00;Designer;8
+6;Roberto Santos;02/06/2025;08:00;12:00;13:00;17:00;Suporte;8
+6;Roberto Santos;03/06/2025;08:00;12:00;13:00;17:00;Suporte;8
+6;Roberto Santos;04/06/2025;08:00;12:00;13:00;17:00;Suporte;8
+6;Roberto Santos;05/06/2025;08:00;12:00;13:00;17:00;Suporte;8
+6;Roberto Santos;06/06/2025;08:00;12:00;13:00;17:30;Suporte;8
+7;André Botelho;02/06/2025;08:00;12:00;13:00;18:00;Suporte;8
+7;André Botelho;03/06/2025;08:00;12:00;13:00;16:30;Suporte;8
+7;André Botelho;04/06/2025;08:00;12:00;13:00;16:30;Suporte;8
+7;André Botelho;05/06/2025;08:00;12:00;13:00;16:30;Suporte;8
+7;André Botelho;06/06/2025;08:00;12:00;13:00;;Suporte;8
+8;Ronaldo Silva;02/06/2025;08:00;12:00;13:00;18:00;Suporte;8
+8;Ronaldo Silva;03/06/2025;07:30;12:00;13:00;16:30;Suporte;8
+8;Ronaldo Silva;04/06/2025;07:30;12:00;13:00;16:30;Suporte;8
+8;Ronaldo Silva;05/06/2025;07:30;12:00;13:00;16:30;Suporte;8
+8;Ronaldo Silva;06/06/2025;08:00;12:00;13:00;17:30;Suporte;8
+9;Deyvid Lima;02/06/2025;08:00;12:00;13:00;18:00;Suporte;8
+9;Deyvid Lima;03/06/2025;;12:00;13:00;16:30;Suporte;8
+9;Deyvid Lima;04/06/2025;08:00;12:00;13:00;16:30;Suporte;8
+9;Deyvid Lima;05/06/2025;;12:00;13:00;16:30;Suporte;8
+9;Deyvid Lima;06/06/2025;08:00;12:00;13:00;;Suporte;8
+10;Wesley de Melo;02/06/2025;08:00;12:00;13:00;18:00;Suporte;8
+10;Wesley de Melo;03/06/2025;07:50;12:00;13:00;16:30;Suporte;8
+10;Wesley de Melo;04/06/2025;08:00;12:00;13:00;16:30;Suporte;8
+10;Wesley de Melo;05/06/2025;07:55;12:00;13:00;16:30;Suporte;8
+10;Wesley de Melo;06/06/2025;08:00;12:00;13:00;17:20;Suporte;8
