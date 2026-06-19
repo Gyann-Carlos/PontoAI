@@ -1,10 +1,14 @@
 import streamlit as st
 import csv
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 from io import StringIO
+from collections import defaultdict
 import pandas as pd
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -49,11 +53,24 @@ def calcular_horas_trabalhadas(entrada, saida_almoco, retorno_almoco, saida):
 
 def processar_registros(rows):
     colaboradores = {}
+    tem_email = "email" in rows[0] if rows else False
+    emails_por_colab = {}
+    if tem_email:
+        for row in rows:
+            cid = row["colaborador_id"]
+            email_raw = row.get("email", "").strip()
+            if email_raw and cid not in emails_por_colab:
+                emails_por_colab[cid] = email_raw
     for row in rows:
         cid = row["colaborador_id"]
         if cid not in colaboradores:
+            email = emails_por_colab.get(cid, "")
+            if not email:
+                nome_clean = row["nome"].lower().replace(" ", ".").replace("�", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u").replace("ç", "c").replace("ã", "a").replace("õ", "o").replace("ê", "e").replace("ô", "o")
+                email = f"{nome_clean}@positivosmais.com"
             colaboradores[cid] = {
                 "nome": row["nome"],
+                "email": email,
                 "cargo": row["cargo"],
                 "carga_diaria": float(row["carga_horaria_diaria"]),
                 "dias": [],
@@ -121,6 +138,43 @@ def consultar_ollama(prompt):
         return f"Erro: {e}"
 
 
+def gerar_email_ia(nome, pendencia, dias_problema, saldo_total, cargo):
+    prompt = f"""Gere um e-mail profissional e cordial em portugues para um colaborador que esta com pendencias na folha de ponto.
+
+Colaborador: {nome}
+Cargo: {cargo}
+Tipo de pendencia: {pendencia}
+Dias com problemas: {dias_problema}
+Saldo total de horas: {saldo_total}
+
+O e-mail deve:
+- Ser educado e profissional
+- Explicar claramente qual a pendencia
+- Solicitar que o colaborador regularize a situacao
+- Ter um assunto claro
+- Ser assinado como "RH / Departamento Pessoal"
+
+Responda APENAS com o e-mail completo (assunto + corpo)."""
+    return consultar_ollama(prompt)
+
+
+def enviar_email_smtp(assunto, corpo, destino, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_dest):
+    msg = MIMEMultipart()
+    msg["From"] = smtp_dest
+    msg["To"] = destino
+    msg["Subject"] = assunto
+    msg.attach(MIMEText(corpo, "plain", "utf-8"))
+    try:
+        server = smtplib.SMTP(smtp_host, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
 st.set_page_config(page_title="Análise de Folha de Ponto", layout="wide")
 st.title("📊 Análise de Folha de Ponto")
 st.markdown("---")
@@ -166,10 +220,26 @@ with st.sidebar:
         filtro_inicio = None
         filtro_fim = None
 
+    st.markdown("---")
+    st.header("Envio de E-mail")
+    usar_smtp = st.checkbox("Configurar SMTP")
+    if usar_smtp:
+        smtp_host = st.text_input("SMTP Host", value="smtp.gmail.com")
+        smtp_port = st.number_input("SMTP Port", value=587)
+        smtp_user = st.text_input("Usuário (e-mail)")
+        smtp_pass = st.text_input("Senha", type="password")
+        smtp_dest = st.text_input("E-mail do remetente (From)")
+    else:
+        smtp_host = smtp_port = smtp_user = smtp_pass = smtp_dest = None
+    if st.button("✉️ Enviar alertas por e-mail"):
+        st.session_state.enviar_email = True
+
 if "processado" not in st.session_state:
     st.session_state.processado = False
 if "analisar_ia" not in st.session_state:
     st.session_state.analisar_ia = False
+if "enviar_email" not in st.session_state:
+    st.session_state.enviar_email = False
 
 colaboradores = processar_registros(rows)
 
@@ -309,6 +379,59 @@ if st.session_state.processado or True:
                 hide_index=True,
                 use_container_width=True,
             )
+
+if st.session_state.enviar_email:
+    st.markdown("---")
+    st.header("✉️ Envio de Alertas por E-mail")
+    pendentes = {}
+    for cid, info in colaboradores.items():
+        saldo_total = sum(d["saldo"] for d in info["dias"])
+        dias_problema = [(d["data"], d["problemas"]) for d in info["dias"] if d["problemas"]]
+        if dias_problema or saldo_total < 0:
+            pendentes[cid] = info
+
+    if not pendentes:
+        st.success("Nenhum colaborador com pendência encontrado!")
+        st.session_state.enviar_email = False
+    else:
+        st.info(f"{len(pendentes)} colaborador(es) com pendência(s)")
+        with st.spinner("Gerando e-mails com IA e enviando..."):
+            for cid, info in pendentes.items():
+                nome = info["nome"]
+                email = info["email"]
+                saldo_total = sum(d["saldo"] for d in info["dias"])
+                dias_problema_lista = [(d["data"], d["problemas"]) for d in info["dias"] if d["problemas"]]
+                if dias_problema_lista:
+                    dias_str = "; ".join(f"{data} ({', '.join(probs)})" for data, probs in dias_problema_lista)
+                    pendencia = f"Registros incompletos em: {dias_str}"
+                else:
+                    dias_str = ""
+                    pendencia = f"Saldo negativo de horas: {fmt_saldo(saldo_total)}"
+                st.markdown(f"**{nome}** ({email}) — {pendencia}")
+                email_gerado = gerar_email_ia(nome, pendencia, dias_str, fmt_saldo(saldo_total), info["cargo"])
+                if email_gerado.startswith("Erro"):
+                    st.error(f"Falha ao gerar e-mail para {nome}: {email_gerado}")
+                else:
+                    st.text_area(f"E-mail gerado para {nome}", email_gerado, height=200)
+                    if usar_smtp and smtp_host and smtp_user and smtp_pass and smtp_dest:
+                        assunto = "Alerta de pendência na folha de ponto"
+                        corpo = email_gerado
+                        linhas = email_gerado.split("\n")
+                        for i, linha in enumerate(linhas):
+                            if linha.lower().startswith("assunto"):
+                                _, val = linha.split(":", 1)
+                                assunto = val.strip()
+                                corpo = "\n".join(linhas[i+1:])
+                                break
+                        sucesso, erro = enviar_email_smtp(assunto, corpo, email, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_dest)
+                        if sucesso:
+                            st.success(f"E-mail enviado para {nome} ({email})")
+                        else:
+                            st.error(f"Falha ao enviar para {nome}: {erro}")
+                    else:
+                        st.info("E-mail exibido acima (SMTP não configurado). Configure SMTP na barra lateral para envio real.")
+                st.divider()
+        st.session_state.enviar_email = False
 
 if st.session_state.analisar_ia:
     st.markdown("---")
