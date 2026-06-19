@@ -2,14 +2,25 @@ import streamlit as st
 import csv
 import json
 import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.error import URLError
-from io import StringIO
+from io import StringIO, BytesIO
 from collections import defaultdict
 import pandas as pd
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1:8b"
@@ -33,9 +44,161 @@ def fmt_saldo(dec):
     return f"{sinal}{h:02d}:{m:02d}:{s:02d}"
 
 def parse_hora(valor):
-    if not valor or not valor.strip():
+    if not valor or not str(valor).strip():
         return None
-    return datetime.strptime(valor.strip(), "%H:%M")
+    return datetime.strptime(str(valor).strip(), "%H:%M")
+
+
+def normalizar_colunas(rows):
+    mapa = {
+        "matricula": "colaborador_id",
+        "matrícula": "colaborador_id",
+        "colaborador_id": "colaborador_id",
+        "id": "colaborador_id",
+        "nome": "nome",
+        "nome completo": "nome",
+        "data": "data",
+        "dia": "data",
+        "date": "data",
+        "entrada": "entrada",
+        "hor entrada": "entrada",
+        "hora entrada": "entrada",
+        "horário entrada": "entrada",
+        "saida_almoco": "saida_almoco",
+        "saida almoço": "saida_almoco",
+        "saída almoço": "saida_almoco",
+        "retorno_almoco": "retorno_almoco",
+        "retorno almoço": "retorno_almoco",
+        "volta almoço": "retorno_almoco",
+        "saida": "saida",
+        "saída": "saida",
+        "hor saída": "saida",
+        "hor saida": "saida",
+        "hora saída": "saida",
+        "marc saida": "saida",
+        "marc saída": "saida",
+        "cargo": "cargo",
+        "carga_horaria_diaria": "carga_horaria_diaria",
+        "carga horária": "carga_horaria_diaria",
+        "carga horaria": "carga_horaria_diaria",
+        "qtde de horas": "carga_horaria_diaria",
+        "email": "email",
+        "e-mail": "email",
+        "ocorrencia": "ocorrencia",
+        "ocorrência": "ocorrencia",
+    }
+    normalizados = []
+    for row in rows:
+        novo = {}
+        for chave, valor in row.items():
+            chave_limpa = chave.strip().lower() if chave else ""
+            destino = mapa.get(chave_limpa, chave_limpa)
+            if destino not in novo or not novo.get(destino):
+                novo[destino] = valor
+        if "data" in novo:
+            val = novo["data"]
+            if isinstance(val, datetime):
+                novo["data"] = val.strftime("%d/%m/%Y")
+            elif isinstance(val, str) and val.strip():
+                for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        novo["data"] = datetime.strptime(val.strip(), fmt).strftime("%d/%m/%Y")
+                        break
+                    except ValueError:
+                        continue
+        for campo in ("entrada", "saida", "saida_almoco", "retorno_almoco"):
+            if campo in novo:
+                if isinstance(novo[campo], datetime):
+                    novo[campo] = novo[campo].strftime("%H:%M")
+                else:
+                    val = str(novo[campo]).strip().lstrip("'").strip()
+                    novo[campo] = val if val else ""
+        if "carga_horaria_diaria" in novo:
+            val = str(novo["carga_horaria_diaria"]).replace(",", ".").strip().lstrip("'")
+            try:
+                if ":" in val:
+                    h, m = val.split(":")
+                    novo["carga_horaria_diaria"] = str(int(h) + int(int(m) / 60))
+                else:
+                    novo["carga_horaria_diaria"] = str(int(float(val)))
+            except (ValueError, ZeroDivisionError):
+                novo["carga_horaria_diaria"] = "8"
+        else:
+            novo["carga_horaria_diaria"] = "8"
+        if "cargo" not in novo or not novo.get("cargo"):
+            novo["cargo"] = "Colaborador"
+        if "saida_almoco" not in novo:
+            novo["saida_almoco"] = ""
+        if "retorno_almoco" not in novo:
+            novo["retorno_almoco"] = ""
+        normalizados.append(novo)
+    return normalizados
+
+
+def ler_csv(arquivo):
+    raw = arquivo.read()
+    for enc in ("utf-8-sig", "latin-1", "cp1252", "iso-8859-1"):
+        try:
+            content = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        content = raw.decode("latin-1", errors="replace")
+    return list(csv.DictReader(StringIO(content), delimiter=";"))
+
+
+def ler_xlsx(arquivo):
+    if not openpyxl:
+        raise ImportError("openpyxl nao instalado. Instale com: pip install openpyxl")
+    wb = openpyxl.load_workbook(arquivo)
+    ws = wb.active
+    headers = []
+    for cell in next(ws.iter_rows(min_row=1, max_row=1)):
+        headers.append(cell.value)
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        d = {}
+        for h, v in zip(headers, row):
+            chave = str(h or "")
+            if isinstance(v, datetime):
+                d[chave] = v
+            else:
+                d[chave] = str(v or "")
+        rows.append(d)
+    return rows
+
+
+def ler_pdf(arquivo):
+    if not pdfplumber:
+        raise ImportError("pdfplumber nao instalado. Instale com: pip install pdfplumber")
+    rows = []
+    with pdfplumber.open(arquivo) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                if not table or len(table) < 2:
+                    continue
+                headers = [str(h or "").strip() for h in table[0]]
+                for data_row in table[1:]:
+                    row = {}
+                    for h, v in zip(headers, data_row):
+                        row[h] = str(v or "").strip()
+                    rows.append(row)
+    return rows
+
+
+def ler_arquivo(arquivo, nome_arquivo):
+    ext = os.path.splitext(nome_arquivo)[1].lower()
+    if ext == ".csv":
+        rows = ler_csv(arquivo)
+    elif ext in (".xlsx", ".xls"):
+        rows = ler_xlsx(arquivo)
+    elif ext == ".pdf":
+        rows = ler_pdf(arquivo)
+    else:
+        raise ValueError(f"Formato nao suportado: {ext}")
+    return normalizar_colunas(rows)
 
 
 def calcular_horas_trabalhadas(entrada, saida_almoco, retorno_almoco, saida):
@@ -61,6 +224,10 @@ def processar_registros(rows):
             email_raw = row.get("email", "").strip()
             if email_raw and cid not in emails_por_colab:
                 emails_por_colab[cid] = email_raw
+    campos_ponto = ["entrada", "saida"]
+    tem_almoco = any(row.get("saida_almoco", "").strip() for row in rows)
+    if tem_almoco:
+        campos_ponto += ["saida_almoco", "retorno_almoco"]
     for row in rows:
         cid = row["colaborador_id"]
         if cid not in colaboradores:
@@ -71,32 +238,51 @@ def processar_registros(rows):
             colaboradores[cid] = {
                 "nome": row["nome"],
                 "email": email,
-                "cargo": row["cargo"],
-                "carga_diaria": float(row["carga_horaria_diaria"]),
+                "cargo": row.get("cargo", "Colaborador"),
+                "carga_diaria": float(row.get("carga_horaria_diaria", "8")),
                 "dias": [],
             }
         problemas = []
-        for campo, rotulo in [
-            ("entrada", "Entrada"),
-            ("saida_almoco", "Saida almoco"),
-            ("retorno_almoco", "Retorno almoco"),
-            ("saida", "Saida"),
-        ]:
+        ocorrencia = row.get("ocorrencia", "").strip()
+        if ocorrencia:
+            mapa_ocorrencia = {
+                "s/marcação de entrada": "Entrada",
+                "s/marcação de saída": "Saída",
+                "entrada em atraso": "Entrada em atraso",
+                "saída antecipada": "Saída antecipada",
+                "intervalo irregular": "Intervalo irregular",
+                "marcação irregular": "Marcação irregular",
+            }
+            for chave, rotulo in mapa_ocorrencia.items():
+                if ocorrencia.lower().startswith(chave):
+                    problemas.append(rotulo)
+        for campo in campos_ponto:
+            rotulo_map = {
+                "entrada": "Entrada",
+                "saida": "Saída",
+                "saida_almoco": "Saida almoco",
+                "retorno_almoco": "Retorno almoco",
+            }
             if not row.get(campo, "").strip():
-                problemas.append(rotulo)
+                rotulo = rotulo_map[campo]
+                if rotulo not in problemas:
+                    problemas.append(rotulo)
 
         horas_trab = calcular_horas_trabalhadas(
-            row["entrada"], row["saida_almoco"], row["retorno_almoco"], row["saida"]
+            row.get("entrada", ""),
+            row.get("saida_almoco", "") if tem_almoco else "",
+            row.get("retorno_almoco", "") if tem_almoco else "",
+            row.get("saida", ""),
         )
         carga = colaboradores[cid]["carga_diaria"]
         saldo = round(horas_trab - carga, 2)
 
         colaboradores[cid]["dias"].append({
-            "data": row["data"],
-            "entrada": row["entrada"],
-            "saida_almoco": row["saida_almoco"],
-            "retorno_almoco": row["retorno_almoco"],
-            "saida": row["saida"],
+            "data": row.get("data", ""),
+            "entrada": row.get("entrada", ""),
+            "saida_almoco": row.get("saida_almoco", ""),
+            "retorno_almoco": row.get("retorno_almoco", ""),
+            "saida": row.get("saida", ""),
             "horas_trabalhadas": horas_trab,
             "saldo": saldo,
             "problemas": problemas,
@@ -181,27 +367,33 @@ st.markdown("---")
 
 with st.sidebar:
     st.header("Configuração")
-    arquivo = st.file_uploader("Upload do CSV", type="csv")
+    arquivo = st.file_uploader("Upload do arquivo", type=["csv", "xlsx", "xls", "pdf"])
     if arquivo:
-        raw = arquivo.read()
-        for enc in ("utf-8-sig", "latin-1", "cp1252", "iso-8859-1"):
-            try:
-                content = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            content = raw.decode("latin-1", errors="replace")
-        rows = list(csv.DictReader(StringIO(content), delimiter=";"))
+        try:
+            rows = ler_arquivo(arquivo, arquivo.name)
+            st.success(f"Arquivo carregado: {arquivo.name} ({len(rows)} registros)")
+        except Exception as e:
+            st.error(f"Erro ao ler arquivo: {e}")
+            rows = []
     else:
         try:
-            with open(CSV_PADRAO, "r", encoding="utf-8-sig") as f:
-                content = f.read()
-            rows = list(csv.DictReader(StringIO(content), delimiter=";"))
-            st.info(f"Usando arquivo padrão: {CSV_PADRAO}")
-        except FileNotFoundError:
-            st.error("Nenhum arquivo encontrado. Faça upload de um CSV.")
+            for nome in [CSV_PADRAO, "folha_ponto2.csv", "AJUSTES 19 DE JUNHO.xlsx"]:
+                if os.path.exists(nome):
+                    with open(nome, "rb") as f:
+                        buf = BytesIO(f.read())
+                    rows = ler_arquivo(buf, nome)
+                    st.info(f"Usando arquivo padrão: {nome}")
+                    break
+            else:
+                st.error("Nenhum arquivo encontrado. Faça upload de um CSV, XLSX ou PDF.")
+                st.stop()
+        except Exception as e:
+            st.error(f"Erro ao ler arquivo padrão: {e}")
             st.stop()
+
+    if not rows:
+        st.warning("Nenhum dado encontrado no arquivo.")
+        st.stop()
 
     if st.button("🔄 Processar dados"):
         st.session_state.processado = True
@@ -224,7 +416,7 @@ with st.sidebar:
     st.header("Envio de E-mail")
     usar_smtp = st.checkbox("Configurar SMTP")
     if usar_smtp:
-        smtp_host = st.text_input("SMTP Host", value="smtp.gmail.com")
+        smtp_host = st.text_input("SMTP Host", value="smtp.positivosmais.com")
         smtp_port = st.number_input("SMTP Port", value=587)
         smtp_user = st.text_input("Usuário (e-mail)")
         smtp_pass = st.text_input("Senha", type="password")
