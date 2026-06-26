@@ -3,6 +3,7 @@ import csv
 import json
 import smtplib
 import os
+import socket
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -391,12 +392,20 @@ def enviar_email_smtp(assunto, corpo, destino, smtp_host, smtp_port, smtp_user, 
     msg["Subject"] = assunto
     msg.attach(MIMEText(corpo, "plain", "utf-8"))
     try:
-        server = smtplib.SMTP(smtp_host, smtp_port)
+        server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
         return True, None
+    except socket.gaierror:
+        return False, f"Nao foi possivel resolver o servidor SMTP '{smtp_host}'. Verifique se o host esta correto."
+    except smtplib.SMTPAuthenticationError:
+        return False, "Falha de autenticacao. Verifique usuario e senha."
+    except smtplib.SMTPConnectError:
+        return False, f"Nao foi possivel conectar em {smtp_host}:{smtp_port}. Verifique host e porta."
+    except smtplib.SMTPException as e:
+        return False, f"Erro SMTP: {e}"
     except Exception as e:
         return False, str(e)
 
