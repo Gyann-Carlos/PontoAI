@@ -26,6 +26,58 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1:8b"
 CSV_PADRAO = "folha_ponto.csv"
 
+TIPOS_IA = ["Local (Ollama)", "Online (API)"]
+
+
+def listar_modelos_ollama():
+    try:
+        req = Request("http://localhost:11434/api/tags")
+        with urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            return [m["name"] for m in data.get("models", [])]
+    except Exception:
+        return []
+
+
+def consultar_ollama(prompt, modelo):
+    payload = json.dumps({"model": modelo, "prompt": prompt, "stream": False}).encode("utf-8")
+    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(req, timeout=300) as resp:
+            return json.loads(resp.read())["response"]
+    except URLError as e:
+        return f"Erro ao conectar no Ollama: {e.reason}"
+    except Exception as e:
+        return f"Erro: {e}"
+
+
+def consultar_api_online(prompt, api_key, endpoint, modelo):
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = json.dumps({
+        "model": modelo,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }).encode("utf-8")
+    try:
+        req = Request(endpoint, data=payload, headers=headers)
+        with urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read())
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except URLError as e:
+        return f"Erro ao conectar na API: {e.reason}"
+    except Exception as e:
+        return f"Erro: {e}"
+
+
+def consultar_ia(prompt, tipo_ia, modelo, api_key="", endpoint=""):
+    if tipo_ia == "Local (Ollama)":
+        return consultar_ollama(prompt, modelo)
+    else:
+        return consultar_api_online(prompt, api_key, endpoint, modelo)
+
 
 def fmt_hora(valor):
     if not valor or not valor.strip():
@@ -312,19 +364,7 @@ def gerar_resumo_texto(colaboradores):
     return "\n".join(linhas)
 
 
-def consultar_ollama(prompt):
-    payload = json.dumps({"model": MODEL, "prompt": prompt, "stream": False}).encode("utf-8")
-    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urlopen(req, timeout=300) as resp:
-            return json.loads(resp.read())["response"]
-    except URLError as e:
-        return f"Erro ao conectar no Ollama: {e.reason}"
-    except Exception as e:
-        return f"Erro: {e}"
-
-
-def gerar_email_ia(nome, pendencia, dias_problema, saldo_total, cargo):
+def gerar_email_ia(nome, pendencia, dias_problema, saldo_total, cargo, tipo_ia, modelo, api_key="", endpoint=""):
     prompt = f"""Gere um e-mail profissional e cordial em portugues para um colaborador que esta com pendencias na folha de ponto.
 
 Colaborador: {nome}
@@ -341,7 +381,7 @@ O e-mail deve:
 - Ser assinado como "RH / Departamento Pessoal"
 
 Responda APENAS com o e-mail completo (assunto + corpo)."""
-    return consultar_ollama(prompt)
+    return consultar_ia(prompt, tipo_ia, modelo, api_key, endpoint)
 
 
 def enviar_email_smtp(assunto, corpo, destino, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_dest):
@@ -397,7 +437,23 @@ with st.sidebar:
 
     if st.button("🔄 Processar dados"):
         st.session_state.processado = True
-    if st.button("🤖 Analisar com IA (Ollama)"):
+
+    st.markdown("---")
+    st.header("IA")
+    tipo_ia = st.radio("Tipo de IA", TIPOS_IA, key="tipo_ia")
+    modelo_ia = MODEL
+    api_key_ia = ""
+    endpoint_ia = ""
+    if tipo_ia == "Local (Ollama)":
+        modelos = listar_modelos_ollama()
+        if not modelos:
+            modelos = [MODEL]
+        modelo_ia = st.selectbox("Modelo Ollama", modelos, index=modelos.index(MODEL) if MODEL in modelos else 0)
+    else:
+        endpoint_ia = st.text_input("Endpoint API", value="https://api.openai.com/v1/chat/completions")
+        api_key_ia = st.text_input("API Key", type="password")
+        modelo_ia = st.text_input("Modelo", value="gpt-4o-mini")
+    if st.button("🤖 Analisar com IA"):
         st.session_state.analisar_ia = True
 
     st.markdown("---")
@@ -600,7 +656,7 @@ if st.session_state.enviar_email:
                     dias_str = ""
                     pendencia = f"Saldo negativo de horas: {fmt_saldo(saldo_total)}"
                 st.markdown(f"**{nome}** ({email}) — {pendencia}")
-                email_gerado = gerar_email_ia(nome, pendencia, dias_str, fmt_saldo(saldo_total), info["cargo"])
+                email_gerado = gerar_email_ia(nome, pendencia, dias_str, fmt_saldo(saldo_total), info["cargo"], tipo_ia, modelo_ia, api_key_ia, endpoint_ia)
                 if email_gerado.startswith("Erro"):
                     st.error(f"Falha ao gerar e-mail para {nome}: {email_gerado}")
                 else:
@@ -627,8 +683,8 @@ if st.session_state.enviar_email:
 
 if st.session_state.analisar_ia:
     st.markdown("---")
-    st.header("🤖 Análise com IA (Ollama)")
-    with st.spinner("Consultando Ollama (pode levar alguns minutos)..."):
+    st.header(f"🤖 Análise com IA ({tipo_ia})")
+    with st.spinner(f"Consultando {tipo_ia} ({modelo_ia})..."):
         resumo = gerar_resumo_texto(colaboradores)
         prompt = f"""Voce e um analista de RH. Analise os seguintes dados de folha de ponto e identifique:
 1. Quais colaboradores tem dias com registros de ponto faltando (nao bateram o ponto em determinados horarios)
@@ -639,5 +695,5 @@ Dados:
 {resumo}
 
 Responda de forma clara e concisa em portugues."""
-        resposta = consultar_ollama(prompt)
+        resposta = consultar_ia(prompt, tipo_ia, modelo_ia, api_key_ia, endpoint_ia)
         st.markdown(resposta)
